@@ -1,146 +1,209 @@
-import numpy as np
+import tkinter as tk
+from tkinter import messagebox
 import matplotlib.pyplot as plt
+import numpy as np
 import sympy as sp
 
-# --- Функции принадлежности ---
-def trapezoidal_membership(x, a, b, c, d):
+# --- Функции принадлежности --- 
+def trapezoid_mf(x, a, b, c, d):
     if x <= a or x >= d:
         return 0.0
-    elif a < x < b:
+    elif x < b:
         return (x - a) / (b - a)
-    elif b <= x <= c:
+    elif x <= c:
         return 1.0
     else:
         return (d - x) / (d - c)
 
-def triangular_membership(x, a, b, c):
+def triangle_mf(x, a, b, c):
     if x <= a or x >= c:
         return 0.0
-    elif a < x < b:
+    elif x < b:
         return (x - a) / (b - a)
     else:
         return (c - x) / (c - b)
 
-# --- Ввод типа функции ---
-mf_type = input("Выберите тип функции принадлежности (Трапециевидная/Треугольная): ").strip()
+def is_linear_function(expr, var):
+    return expr.is_polynomial(var) and expr.as_poly(var).degree() <= 1
 
-# --- Ввод параметров ---
-def get_params(n):
-    result = []
-    for i in range(1, n + 1):
-        while True:
-            try:
-                raw = input(f"Параметры для A{i} (через пробел): ")
-                values = list(map(float, raw.split()))
-                expected = 4 if mf_type == "Трапециевидная" else 3
-                if len(values) == expected:
-                    result.append(values)
-                    break
-                else:
-                    print(f"Введите {expected} значения.")
-            except ValueError:
-                print("Ошибка: попробуйте снова.")
-    return result
+class FuzzyApp(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Модель Такаги-Сугено")
+        self.geometry("800x700")
+        self.inputs_frame = tk.Frame(self)
+        self.inputs_frame.pack(pady=10)
 
-params = get_params(5)
+        self.fp_type = tk.StringVar(value="Треугольная")
+        tk.Label(self.inputs_frame, text="Тип функции принадлежности:").grid(row=0, column=0, sticky="w")
+        fp_type_menu = tk.OptionMenu(self.inputs_frame, self.fp_type, "Треугольная", "Трапециевидная", command=self.update_input_fields)
+        fp_type_menu.grid(row=0, column=1, sticky="w")
 
-# --- Построение функций принадлежности ---
-membership_fn = trapezoidal_membership if mf_type == "Трапециевидная" else triangular_membership
-mu = [lambda x, p=p: membership_fn(x, *p) for p in params]
+        self.param_entries = []
+        for i in range(5):
+            tk.Label(self.inputs_frame, text=f"A{i+1} параметры:").grid(row=i+1, column=0, sticky="w")
+            entry = tk.Entry(self.inputs_frame, width=30)
+            entry.grid(row=i+1, column=1, sticky="w")
+            self.param_entries.append(entry)
 
-# --- Ввод линейных функций ---
-x_sym = sp.Symbol('x')
+        self.func_entries = []
+        for i in range(5):
+            tk.Label(self.inputs_frame, text=f"f{i+1}(x):").grid(row=i+1, column=2, sticky="w")
+            entry = tk.Entry(self.inputs_frame, width=30)
+            entry.grid(row=i+1, column=3, sticky="w")
+            self.func_entries.append(entry)
 
-def is_linear(expr):
-    return expr.is_polynomial(x_sym) and expr.as_poly(x_sym).degree() <= 1
+        tk.Label(self.inputs_frame, text="Значения x (через пробел):").grid(row=6, column=0, sticky="w")
+        self.x_entry = tk.Entry(self.inputs_frame, width=60)
+        self.x_entry.grid(row=6, column=1, columnspan=3, sticky="w")
 
-def get_linear_function(prompt):
-    while True:
+        self.calc_btn = tk.Button(self, text="Рассчитать и построить графики", command=self.run)
+        self.calc_btn.pack(pady=10)
+
+        self.set_default_values()
+
+    def set_default_values(self):
+        triangle_defaults = [
+            [0, 1, 2],  
+            [1, 2, 3],  
+            [2, 3, 4],  
+            [3, 4, 5],  
+            [4, 5, 6]
+        ]
+        
+        trapezoid_defaults = [
+            [0, 1, 2, 3],  
+            [1, 2, 3, 4],  
+            [2, 3, 4, 5],  
+            [3, 4, 5, 6],  
+            [4, 5, 6, 7]   
+        ]
+
+        function_defaults = [
+            "x",           
+            "2*x + 1",     
+            "0.5 * x - 2", 
+            "-x + 3",      
+            "3 * x"        
+        ]
+
+        x_defaults = "0 1 2 3 4 5"
+
+        if self.fp_type.get() == "Треугольная":
+            for i, entry in enumerate(self.param_entries):
+                entry.delete(0, tk.END)
+                entry.insert(0, ' '.join(map(str, triangle_defaults[i])))
+        else:
+            for i, entry in enumerate(self.param_entries):
+                entry.delete(0, tk.END)
+                entry.insert(0, ' '.join(map(str, trapezoid_defaults[i])))
+
+        for i, entry in enumerate(self.func_entries):
+            entry.delete(0, tk.END)
+            entry.insert(0, function_defaults[i])
+
+        self.x_entry.delete(0, tk.END)
+        self.x_entry.insert(0, x_defaults)
+
+    def update_input_fields(self, *args):
+        """
+        Обновляет количество полей для ввода параметров в зависимости от выбранного типа функции принадлежности.
+        """
+        # Очищаем старые поля ввода параметров
+        for entry in self.param_entries:
+            entry.grid_forget()
+
+        # Очищаем старые значения параметров
+        self.param_entries = []
+
+        # Обновляем количество полей для ввода в зависимости от типа функции
+        if self.fp_type.get() == "Треугольная":
+            for i in range(5):
+                tk.Label(self.inputs_frame, text=f"A{i+1} параметры:").grid(row=i+1, column=0, sticky="w")
+                entry = tk.Entry(self.inputs_frame, width=30)
+                entry.grid(row=i+1, column=1, sticky="w")
+                self.param_entries.append(entry)
+        elif self.fp_type.get() == "Трапециевидная":
+            for i in range(5):
+                tk.Label(self.inputs_frame, text=f"A{i+1} параметры:").grid(row=i+1, column=0, sticky="w")
+                entry = tk.Entry(self.inputs_frame, width=30)
+                entry.grid(row=i+1, column=1, sticky="w")
+                self.param_entries.append(entry)
+
+        # Устанавливаем значения по умолчанию для новых полей
+        self.set_default_values()
+
+    def run(self):
         try:
-            expr = sp.sympify(input(prompt))
-            if is_linear(expr):
-                return sp.lambdify(x_sym, expr, 'numpy')
-            print("Введите линейную функцию вида ax + b.")
-        except sp.SympifyError:
-            print("Ошибка синтаксиса. Попробуйте снова.")
+            x = sp.symbols('x')
 
-fs = [get_linear_function(f"f{i+1}(x) = ") for i in range(5)]
+            params = []
+            for entry in self.param_entries:
+                values = list(map(float, entry.get().split()))
+                expected_len = 4 if self.fp_type.get() == "Трапециевидная" else 3
+                if len(values) != expected_len:
+                    raise ValueError(f"Неверное количество параметров: {values}")
+                params.append(values)
 
-# --- Расчет выходной функции ---
-def takagi_sugeno(x):
-    return sum(mu[i](x) * fs[i](x) for i in range(5))
+            functions = []
+            for entry in self.func_entries:
+                expr = sp.sympify(entry.get())
+                if not is_linear_function(expr, x):
+                    raise ValueError(f"Функция не линейна: {expr}")
+                functions.append(sp.lambdify(x, expr, 'numpy'))
 
-# --- Ввод x для вычисления ---
-def get_input_values():
-    while True:
-        try:
-            raw = input("Введите значения x через пробел: ")
-            return list(map(float, raw.split()))
-        except ValueError:
-            print("Ошибка: попробуйте снова.")
+            x_vals = list(map(float, self.x_entry.get().split()))
 
-x_input = get_input_values()
-y_output = [takagi_sugeno(x) for x in x_input]
+            if self.fp_type.get() == "Треугольная":
+                mus = [lambda x, p=p: triangle_mf(x, *p) for p in params]
+            else:
+                mus = [lambda x, p=p: trapezoid_mf(x, *p) for p in params]
 
-print("\nЗначения функции y(x):")
-for xi, yi in zip(x_input, y_output):
-    print(f"y({xi}) = {yi}")
+            def y_ts(x_val):
+                return sum(m(x_val) * f(x_val) for m, f in zip(mus, functions))
 
-# --- Построение графиков ---
-x_range = np.linspace(min(min(p) for p in params), max(max(p) for p in params), 400)
+            print("Значения y(x):")
+            for xv in x_vals:
+                print(f"y({xv}) = {y_ts(xv)}")
 
-membership_values = [[mu[i](x) for x in x_range] for i in range(5)]
-ts_values = [takagi_sugeno(x) for x in x_range]
+            intervals = [(min(p), max(p)) for p in params]
+            x_min, x_max = min(i[0] for i in intervals), max(i[1] for i in intervals)
+            xs = np.linspace(x_min, x_max, 300)
 
-# --- Визуализация ---
-plt.style.use('seaborn-v0_8-darkgrid')
+            fig, axs = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+            
+            for i, (f, intv) in enumerate(zip(functions, intervals)):
+                x_plot = np.linspace(intv[0], intv[1], 100)
+                axs[0].plot(x_plot, f(x_plot), label=f"f{i+1}(x)")
+            axs[0].set_title("Линейные функции")
+            axs[0].legend()
+            axs[0].grid(True)
 
-fig, axs = plt.subplots(2, 1, figsize=(10, 9), sharex=True)
+            for i, m in enumerate(mus):
+                axs[1].plot(xs, [m(x) for x in xs], label=f"mu A{i+1}")
+            axs[1].set_title("Функции принадлежности")
+            axs[1].set_ylim(-0.05, 1.05)
+            axs[1].legend()
+            axs[1].grid(True)
 
-# Графики пользовательских функций
-for i, f in enumerate(fs):
-    x_local = np.linspace(min(params[i]), max(params[i]), 200)
-    axs[0].plot(x_local, f(x_local), label=f"f{i+1}(x)", linewidth=2)
+            plt.tight_layout()
+            plt.show()
 
-axs[0].set_title("Линейные функции пользователя", fontsize=14)
-axs[0].set_ylabel("Значения", fontsize=12)
-axs[0].legend()
-axs[0].grid(True)
+            y_vals = [y_ts(xi) for xi in xs]
+            plt.figure(figsize=(10, 5))
+            plt.plot(xs, y_vals, 'r-', label="y(x) — TS модель")
+            plt.title("Результирующая функция Такаги-Сугено")
+            plt.xlabel("x")
+            plt.ylabel("y")
+            plt.grid(True)
+            plt.legend()
+            plt.tight_layout()
+            plt.show()
 
-# Функции принадлежности
-colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple']
-for i in range(5):
-    axs[1].plot(x_range, membership_values[i], label=f"μA{i+1}", color=colors[i], linestyle='--')
+        except Exception as e:
+            messagebox.showerror("Ошибка", str(e))
 
-axs[1].set_title(f"Функции принадлежности ({mf_type})", fontsize=14)
-axs[1].set_xlabel("x", fontsize=12)
-axs[1].set_ylabel("μ(x)", fontsize=12)
-axs[1].legend()
-axs[1].grid(True)
 
-plt.tight_layout()
-plt.show()
-
-# --- График TS модели ---
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 9), sharex=True)
-
-# Функция Такаги-Сугено
-ax1.plot(x_range, ts_values, label="y(x) (TS)", color="crimson", linewidth=2.5)
-ax1.set_title("Модель Такаги-Сугено", fontsize=14)
-ax1.set_ylabel("y(x)", fontsize=12)
-ax1.grid(True)
-ax1.legend()
-
-# Повтор функций принадлежности
-for i in range(5):
-    ax2.plot(x_range, membership_values[i], label=f"μA{i+1}", color=colors[i], linestyle='--')
-
-ax2.set_title(f"Функции принадлежности ({mf_type})", fontsize=14)
-ax2.set_xlabel("x", fontsize=12)
-ax2.set_ylabel("μ(x)", fontsize=12)
-ax2.set_ylim(-0.05, 1.05)
-ax2.grid(True)
-ax2.legend()
-
-plt.tight_layout()
-plt.show()
+if __name__ == "__main__":
+    app = FuzzyApp()
+    app.mainloop()
