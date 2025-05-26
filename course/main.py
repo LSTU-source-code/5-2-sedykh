@@ -1,173 +1,328 @@
 import numpy as np
-import customtkinter as ctk
-from tkinter import messagebox
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import skfuzzy as fuzz
+import customtkinter as ctk
+import tkinter.messagebox as messagebox
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.pyplot as plt
 
-ctk.set_appearance_mode("System")
+# Настройки шрифтов
+ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
+LARGE_FONT = ('Segoe UI', 14)
+TITLE_FONT = ('Segoe UI', 16, 'bold')
+BUTTON_FONT = ('Segoe UI', 14, 'bold')
 
-class FuzzyPlanner:
+GRAPH_FONT = {'font.family': 'Segoe UI', 'font.size': 14}
+plt.rcParams.update(GRAPH_FONT)
+
+
+class FuzzyLogic:
     def __init__(self):
-        self.days = np.arange(0, 31, 1)
-        self.volume = np.arange(0, 101, 1)
-        self.anxiety = np.arange(0, 11, 0.1)
+        self.hours = np.arange(0, 12.1, 0.1)
 
-        self.days_low = fuzz.trimf(self.days, [0, 0, 10])
-        self.days_medium = fuzz.trimf(self.days, [5, 15, 25])
-        self.days_high = fuzz.trimf(self.days, [20, 30, 30])
+        # Треугольные функции
+        self.tri_low = fuzz.trimf(self.hours, [0, 0, 4])
+        self.tri_medium = fuzz.trimf(self.hours, [2, 5, 8])
+        self.tri_high = fuzz.trimf(self.hours, [6, 10, 12])
 
-        self.volume_small = fuzz.trimf(self.volume, [0, 0, 30])
-        self.volume_medium = fuzz.trimf(self.volume, [20, 50, 80])
-        self.volume_large = fuzz.trimf(self.volume, [60, 100, 100])
+        # Трапецеидальные
+        self.trap_low = fuzz.trapmf(self.hours, [0, 0, 2, 4])
+        self.trap_medium = fuzz.trapmf(self.hours, [3, 5, 6, 8])
+        self.trap_high = fuzz.trapmf(self.hours, [7, 9, 10, 12])
 
-        self.anxiety_low = fuzz.trimf(self.anxiety, [0, 0, 3])
-        self.anxiety_medium = fuzz.trimf(self.anxiety, [2, 5, 8])
-        self.anxiety_high = fuzz.trimf(self.anxiety, [6, 10, 10])
+        # Гауссовские
+        self.gauss_low = fuzz.gaussmf(self.hours, 2, 1)
+        self.gauss_medium = fuzz.gaussmf(self.hours, 5, 1.2)
+        self.gauss_high = fuzz.gaussmf(self.hours, 9, 1.5)
 
-    def fuzzify(self, days, volume, anxiety):
-        d_low = fuzz.interp_membership(self.days, self.days_low, days)
-        d_med = fuzz.interp_membership(self.days, self.days_medium, days)
-        d_high = fuzz.interp_membership(self.days, self.days_high, days)
+        # Обобщенные гауссовские
+        self.gbell_low = fuzz.gbellmf(self.hours, 1.5, 2, 2)
+        self.gbell_medium = fuzz.gbellmf(self.hours, 2, 2, 5)
+        self.gbell_high = fuzz.gbellmf(self.hours, 2, 2, 9)
 
-        v_small = fuzz.interp_membership(self.volume, self.volume_small, volume)
-        v_med = fuzz.interp_membership(self.volume, self.volume_medium, volume)
-        v_large = fuzz.interp_membership(self.volume, self.volume_large, volume)
-
-        a_low = fuzz.interp_membership(self.anxiety, self.anxiety_low, anxiety)
-        a_med = fuzz.interp_membership(self.anxiety, self.anxiety_medium, anxiety)
-        a_high = fuzz.interp_membership(self.anxiety, self.anxiety_high, anxiety)
+    def fuzzify_hours(self, value, method='triangular'):
+        if method == 'triangular':
+            low = fuzz.interp_membership(self.hours, self.tri_low, value)
+            medium = fuzz.interp_membership(self.hours, self.tri_medium, value)
+            high = fuzz.interp_membership(self.hours, self.tri_high, value)
+            funcs = [self.tri_low, self.tri_medium, self.tri_high]
+        elif method == 'trapezoidal':
+            low = fuzz.interp_membership(self.hours, self.trap_low, value)
+            medium = fuzz.interp_membership(self.hours, self.trap_medium, value)
+            high = fuzz.interp_membership(self.hours, self.trap_high, value)
+            funcs = [self.trap_low, self.trap_medium, self.trap_high]
+        elif method == 'gaussian':
+            low = fuzz.interp_membership(self.hours, self.gauss_low, value)
+            medium = fuzz.interp_membership(self.hours, self.gauss_medium, value)
+            high = fuzz.interp_membership(self.hours, self.gauss_high, value)
+            funcs = [self.gauss_low, self.gauss_medium, self.gauss_high]
+        elif method == 'gbell':
+            low = fuzz.interp_membership(self.hours, self.gbell_low, value)
+            medium = fuzz.interp_membership(self.hours, self.gbell_medium, value)
+            high = fuzz.interp_membership(self.hours, self.gbell_high, value)
+            funcs = [self.gbell_low, self.gbell_medium, self.gbell_high]
+        elif method == 'all':
+            return self.fuzzify_hours(value, 'triangular')
+        else:
+            raise ValueError("Неизвестный метод фаззификации.")
 
         return {
-            'days': {'low': d_low, 'medium': d_med, 'high': d_high},
-            'volume': {'small': v_small, 'medium': v_med, 'large': v_large},
-            'anxiety': {'low': a_low, 'medium': a_med, 'high': a_high}
+            'low': low,
+            'medium': medium,
+            'high': high,
+            'funcs': funcs
         }
+
+    def defuzzify(self, aggregated, method='centroid'):
+        if method not in ['centroid', 'bisector', 'mom']:
+            raise ValueError("Метод дефаззификации не распознан.")
+        return fuzz.defuzz(self.hours, aggregated, method)
+
+
+class KnowledgeBase:
+    def __init__(self):
+        self.rules = [
+            {'conditions': {'уровень знаний': 'низкий', 'оставшееся время': '< 1 дня'}, 'recommendation': 'Паниковое повторение основ'},
+            {'conditions': {'уровень знаний': 'средний', 'оставшееся время': '4-7 дней', 'мотивация': 'высокая'}, 'recommendation': 'Создайте подробный план подготовки'},
+            {'conditions': {'усталость': 'да', 'концентрация': 'низкая'}, 'recommendation': 'Сделайте перерыв на 1 день, отдохните'},
+            {'conditions': {'тип экзамена': 'тестирование', 'уровень знаний': 'высокий'}, 'recommendation': 'Тренируйтесь на онлайн-тестах'},
+            {'conditions': {'оставшееся время': '> недели', 'мотивация': 'низкая'}, 'recommendation': 'Установите ежедневные цели'},
+            {'conditions': {'оставшееся время': '1-3 дня', 'качество сна': 'плохое'}, 'recommendation': 'Нормализуйте режим сна'},
+            {'conditions': {'концентрация': 'низкая', 'мотивация': 'низкая'}, 'recommendation': 'Измените среду обучения или место'},
+            {'conditions': {'уровень знаний': 'высокий', 'оставшееся время': '> недели'}, 'recommendation': 'Продолжайте систематически повторять'},
+            {'conditions': {'оставшееся время': '1-3 дня', 'усталость': 'нет'}, 'recommendation': 'Финальный интенсивный повтор'},
+            {'conditions': {'оставшееся время': '4-7 дней', 'усталость': 'нет', 'мотивация': 'высокая'}, 'recommendation': 'Работайте по 2-3 часа с перерывами'}
+        ]
+
+    def get_rules(self):
+        return self.rules
+
+
+class InferenceEngine:
+    def __init__(self, knowledge_base):
+        self.knowledge_base = knowledge_base
+
+    def forward_chaining(self, symptoms):
+        matched_recs = []
+        for rule in self.knowledge_base.get_rules():
+            match_count = sum(1 for k, v in rule['conditions'].items() if symptoms.get(k) == v)
+            if match_count >= 2:
+                matched_recs.append(rule['recommendation'])
+        return matched_recs
+
+    def backward_chaining(self, hypothesis, symptoms):
+        for rule in self.knowledge_base.get_rules():
+            if rule['recommendation'].lower() == hypothesis.lower():
+                matched = {}
+                unmatched = {}
+                for k, v in rule['conditions'].items():
+                    if symptoms.get(k) == v:
+                        matched[k] = v
+                    else:
+                        unmatched[k] = (v, symptoms.get(k))
+                return matched, unmatched
+        return None, None
 
 
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Экспертная система подготовки к экзаменам")
-        self.geometry("1000x700")
-        self.fuzzy_logic = FuzzyPlanner()
 
-        self.mode = ctk.StringVar(value="fuzzy")
+        self.title("🎓 Планирование времени для экзаменов")
+        self.geometry("1200x800")
+        self.minsize(1000, 700)
 
-        self.setup_ui()
+        self.fuzzy = FuzzyLogic()
+        self.kb = KnowledgeBase()
+        self.engine = InferenceEngine(self.kb)
 
-    def setup_ui(self):
-        ctk.CTkLabel(self, text="Система планирования подготовки к экзаменам", font=("Segoe UI", 22)).pack(pady=20)
+        self.create_widgets()
 
-        self.main_frame = ctk.CTkFrame(self)
-        self.main_frame.pack(pady=10, padx=20, fill="both", expand=True)
+    def create_widgets(self):
+        tab_control = ctk.CTkTabview(self, width=1200, height=800)
+        tab_control.pack(padx=10, pady=10, expand=True, fill="both")
 
-        self.mode_switch = ctk.CTkSegmentedButton(self.main_frame, values=["crisp", "fuzzy"], variable=self.mode)
-        self.mode_switch.pack(pady=15)
+        tab_crisp = tab_control.add("Чёткая логика")
+        tab_fuzzy = tab_control.add("Нечёткая логика")
 
-        self.days_input = ctk.CTkSlider(self.main_frame, from_=0, to=30, number_of_steps=30)
-        self.volume_input = ctk.CTkSlider(self.main_frame, from_=0, to=100, number_of_steps=100)
-        self.anxiety_input = ctk.CTkSlider(self.main_frame, from_=0, to=10, number_of_steps=100)
+        self.build_crisp_tab(tab_crisp)
+        self.build_fuzzy_tab(tab_fuzzy)
 
-        self.exam_count = ctk.CTkOptionMenu(self.main_frame, values=["1", "2", "3", "4", "5"])
-        self.prep_level = ctk.CTkOptionMenu(self.main_frame, values=["низкий", "средний", "высокий"])
+    def build_crisp_tab(self, frame):
+        frame.grid_columnconfigure(0, minsize=150)
+        frame.grid_columnconfigure(1, weight=1)
 
-        self._make_labeled_slider("Дней до экзамена", self.days_input)
-        self._make_labeled_slider("Объём материала (часов)", self.volume_input)
-        self._make_labeled_slider("Уровень тревожности", self.anxiety_input)
+        self.symptoms_vars = {
+            'уровень знаний': ctk.StringVar(value='средний'),
+            'оставшееся время': ctk.StringVar(value='4-7 дней'),
+            'тип экзамена': ctk.StringVar(value='билеты'),
+            'мотивация': ctk.StringVar(value='средняя'),
+            'усталость': ctk.StringVar(value='нет'),
+            'концентрация': ctk.StringVar(value='средняя'),
+            'качество сна': ctk.StringVar(value='хорошее')
+        }
 
-        self._make_labeled_dropdown("Количество экзаменов", self.exam_count)
-        self._make_labeled_dropdown("Уровень подготовки", self.prep_level)
+        options_for = {
+            'уровень знаний': ['низкий', 'средний', 'высокий'],
+            'оставшееся время': ['< 1 дня', '1-3 дня', '4-7 дней', '> недели'],
+            'тип экзамена': ['тестирование', 'билеты', 'задачи'],
+            'мотивация': ['низкая', 'средняя', 'высокая'],
+            'усталость': ['нет', 'да'],
+            'концентрация': ['низкая', 'средняя', 'высокая'],
+            'качество сна': ['плохое', 'хорошее']
+        }
 
-        ctk.CTkButton(self.main_frame, text="Получить рекомендации", command=self.get_recommendations).pack(pady=20)
+        row = 0
+        for symptom, var in self.symptoms_vars.items():
+            ctk.CTkLabel(frame, text=symptom, font=LARGE_FONT).grid(row=row, column=0, sticky='w', padx=15, pady=10)
+            combo = ctk.CTkComboBox(frame, values=options_for[symptom], variable=var, width=200)
+            combo.grid(row=row, column=1, padx=15, pady=10, sticky='ew')
+            row += 1
 
-        self.result_text = ctk.CTkTextbox(self.main_frame, height=150, font=("Segoe UI", 14))
-        self.result_text.pack(fill="x", padx=20, pady=10)
+        self.chain_var = ctk.StringVar(value='1')
+        ctk.CTkLabel(frame, text="Метод вывода:", font=LARGE_FONT).grid(row=row, column=0, sticky='w', padx=15, pady=10)
+        ctk.CTkLabel(frame, text="1 - Прямой анализ\n2 - Обратный поиск", font=LARGE_FONT).grid(
+            row=row, column=1, sticky='w', padx=15, pady=5)
+        row += 1
+        ctk.CTkComboBox(frame, values=['1', '2'], variable=self.chain_var, width=200).grid(
+            row=row, column=1, padx=15, pady=5, sticky='ew')
 
-        self.plot_frame = ctk.CTkFrame(self.main_frame)
-        self.plot_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        row += 1
+        self.hypothesis_var = ctk.StringVar()
+        ctk.CTkLabel(frame, text="Гипотеза (для метода 2):", font=LARGE_FONT).grid(
+            row=row, column=0, sticky='w', padx=15, pady=10)
+        ctk.CTkEntry(frame, textvariable=self.hypothesis_var, width=200).grid(
+            row=row, column=1, padx=15, pady=10, sticky='ew')
 
-    def _make_labeled_slider(self, label, slider):
-        ctk.CTkLabel(self.main_frame, text=label, anchor="w").pack(pady=(10, 0), padx=20, fill="x")
-        slider.pack(padx=20, pady=5, fill="x")
+        row += 1
+        ctk.CTkButton(frame, text="Получить рекомендации", command=self.run_crisp_mode, font=BUTTON_FONT).grid(
+            row=row, column=0, columnspan=2, pady=20, padx=15, ipady=10, sticky='nsew')
 
-    def _make_labeled_dropdown(self, label, dropdown):
-        ctk.CTkLabel(self.main_frame, text=label, anchor="w").pack(pady=(10, 0), padx=20, fill="x")
-        dropdown.pack(padx=20, pady=5, fill="x")
+    def build_fuzzy_tab(self, frame):
+        frame.grid_columnconfigure(0, weight=1)
 
-    def get_recommendations(self):
-        mode = self.mode.get()
-        days = self.days_input.get()
-        volume = self.volume_input.get()
-        anxiety = self.anxiety_input.get()
-        exams = int(self.exam_count.get())
-        prep = self.prep_level.get()
+        self.hours_input = ctk.DoubleVar(value=6.0)
+        self.defuzz_method = ctk.StringVar(value='centroid')
+        self.fuzz_method = ctk.StringVar(value='all')
 
-        if mode == "crisp":
-            self.show_crisp_result(days, volume, exams, prep)
+        ctk.CTkLabel(frame, text="Часы в день на подготовку:", font=LARGE_FONT).pack(pady=(20, 5))
+        ctk.CTkEntry(frame, textvariable=self.hours_input, width=200).pack(pady=5)
+
+        ctk.CTkLabel(frame, text="Метод фаззификации:", font=LARGE_FONT).pack(pady=(20, 5))
+        ctk.CTkComboBox(frame, values=['all', 'triangular', 'trapezoidal', 'gaussian', 'gbell'],
+                        variable=self.fuzz_method, width=200).pack(pady=5)
+
+        ctk.CTkLabel(frame, text="Метод дефаззификации:", font=LARGE_FONT).pack(pady=(20, 5))
+        ctk.CTkComboBox(frame, values=['centroid', 'bisector', 'mom'],
+                        variable=self.defuzz_method, width=200).pack(pady=5)
+
+        ctk.CTkButton(frame, text="Рассчитать", command=self.run_fuzzy_mode, font=BUTTON_FONT).pack(
+            pady=30, ipady=10, ipadx=20)
+
+        self.fig, self.ax = plt.subplots(figsize=(8, 5), dpi=100)
+        self.canvas = FigureCanvasTkAgg(self.fig, master=frame)
+        self.canvas.get_tk_widget().pack(fill='both', expand=True, padx=20, pady=20)
+
+    def run_fuzzy_mode(self):
+        try:
+            value = float(self.hours_input.get())
+            if value < 0 or value > 12:
+                messagebox.showerror("❌ Ошибка", "Часы должны быть в диапазоне 0–12")
+                return
+        except Exception:
+            messagebox.showerror("❌ Ошибка", "Введите корректное число для часов.")
+            return
+
+        method = self.defuzz_method.get()
+        fuzz_method = self.fuzz_method.get()
+        results = self.fuzzy.fuzzify_hours(value, fuzz_method)
+        memberships = {k: results[k] for k in ['low', 'medium', 'high']}
+        funcs = results['funcs']
+
+        aggregated = np.fmax(np.fmax(
+            memberships['low'] * funcs[0],
+            memberships['medium'] * funcs[1]),
+            memberships['high'] * funcs[2])
+
+        crisp_value = self.fuzzy.defuzzify(aggregated, method)
+
+        stress_based_rec = {
+            'low': ['Хорошо! Добавьте немного практики.', 'Поддерживайте текущий ритм.'],
+            'medium': ['Увеличьте отдых.', 'Делайте перерывы каждые 45 минут.'],
+            'high': ['Уменьшите нагрузку.', 'Обратитесь к психологу.', 'Старайтесь спать минимум 7 часов.']
+        }
+
+        temp_diagnoses = []
+        sorted_levels = sorted(memberships.items(), key=lambda x: x[1], reverse=True)
+        for level, strength in sorted_levels:
+            if strength > 0.2:
+                for r in stress_based_rec.get(level, []):
+                    temp_diagnoses.append(f"{r} ({strength:.2f})")
+
+        max_term = max(memberships, key=memberships.get)
+        max_value = memberships[max_term]
+
+        self.ax.clear()
+        self.ax.plot(self.fuzzy.hours, funcs[0], 'b', label='Низкий стресс')
+        self.ax.plot(self.fuzzy.hours, funcs[1], 'g', label='Средний стресс')
+        self.ax.plot(self.fuzzy.hours, funcs[2], 'r', label='Высокий стресс')
+        self.ax.fill_between(self.fuzzy.hours, np.zeros_like(aggregated), aggregated, facecolor='y', alpha=0.1)
+        self.ax.axvline(value, color='k', linestyle=':', label=f'Часы в день: {value:.2f}')
+        self.ax.axvline(crisp_value, color='k', linestyle='--', label=f'Оценка стресса: {crisp_value:.2f}')
+
+        self.ax.set_title(f"Степень стресса\nМакс. уровень: {max_term} ({max_value:.2f})", fontsize=14)
+        self.ax.set_xlabel("Часы в день")
+        self.ax.set_ylabel("Степень принадлежности")
+        self.ax.legend()
+        self.ax.grid(True)
+        self.canvas.draw()
+
+        membership_msg = "\n".join([f"{k}: {v:.2f}" for k, v in memberships.items()])
+        diagnoses_msg = "Рекомендации по стрессу:\n" + "\n".join(temp_diagnoses) if temp_diagnoses else ""
+
+        messagebox.showinfo("📊 Результат",
+                            f"Степени стресса:\n{membership_msg}\n"
+                            f"Максимальный уровень: {max_term} ({max_value:.2f})\n"
+                            f"Дефаззифицированное значение: {crisp_value:.2f} ч.\n"
+                            f"{diagnoses_msg}\n"
+                            f"Метод фаззификации: {fuzz_method}, Метод дефаззификации: {method}")
+
+    def run_crisp_mode(self):
+        symptoms = {k: v.get() for k, v in self.symptoms_vars.items()}
+        chain = self.chain_var.get()
+
+        if chain == '1':
+            recommendations = self.engine.forward_chaining(symptoms)
+            if recommendations:
+                messagebox.showinfo("🎓 Рекомендации", "Найденные рекомендации:\n" + "\n".join(recommendations))
+            else:
+                messagebox.showinfo("⚠️ Рекомендации", "Не найдено подходящих рекомендаций.")
+
+        elif chain == '2':
+            hypothesis = self.hypothesis_var.get().strip()
+            if not hypothesis:
+                messagebox.showerror("❌ Ошибка", "Введите гипотезу для метода 2.")
+                return
+            matched, unmatched = self.engine.backward_chaining(hypothesis, symptoms)
+            if matched is None:
+                messagebox.showinfo("🔍 Результат", f"Гипотеза '{hypothesis}' не найдена.")
+                return
+
+            msg = f"Гипотеза: {hypothesis}\n"
+            msg += "Подтверждённые параметры:\n"
+            for k, v in matched.items():
+                msg += f"- {k}: {v}\n"
+            if unmatched:
+                msg += "\nНесовпадающие параметры:\n"
+                for k, (expected, actual) in unmatched.items():
+                    msg += f"- {k}: ожидалось {expected}, указано {actual}\n"
+            else:
+                msg += "\nВсе параметры соответствуют гипотезе."
+
+            messagebox.showinfo("📊 Результат", msg)
         else:
-            self.show_fuzzy_result(days, volume, anxiety)
-
-    def show_crisp_result(self, days, volume, exams, prep):
-        recommendation = ""
-
-        if days < 5 or volume > 70:
-            recommendation += "🧠 Срочно начни подготовку! Учить по 6+ часов в день.\n"
-        elif prep == "низкий":
-            recommendation += "📚 Составь расписание и начни с самых сложных тем.\n"
-        elif prep == "высокий" and days > 10:
-            recommendation += "✅ Можешь распределить материал равномерно по 2–3 часа в день.\n"
-        else:
-            recommendation += "⚖️ Учи по 4 часа в день, делай перерывы каждые 60 минут.\n"
-
-        if exams >= 3:
-            recommendation += "📝 Удели внимание приоритизации тем для каждого экзамена.\n"
-
-        self.result_text.delete("1.0", "end")
-        self.result_text.insert("end", recommendation)
-
-        for widget in self.plot_frame.winfo_children():
-            widget.destroy()
-
-    def show_fuzzy_result(self, days, volume, anxiety):
-        fuzzy_values = self.fuzzy_logic.fuzzify(days, volume, anxiety)
-        days_lvl = max(fuzzy_values['days'], key=fuzzy_values['days'].get)
-        volume_lvl = max(fuzzy_values['volume'], key=fuzzy_values['volume'].get)
-        anxiety_lvl = max(fuzzy_values['anxiety'], key=fuzzy_values['anxiety'].get)
-
-        message = f"📊 Дней до экзамена: {days_lvl} ({fuzzy_values['days'][days_lvl]:.2f})\n"
-        message += f"📊 Объём материала: {volume_lvl} ({fuzzy_values['volume'][volume_lvl]:.2f})\n"
-        message += f"📊 Тревожность: {anxiety_lvl} ({fuzzy_values['anxiety'][anxiety_lvl]:.2f})\n\n"
-
-        # Генерация рекомендаций
-        if days_lvl == "low" and volume_lvl == "large":
-            message += "🚨 Учти: мало времени и большой объём. Учить 6+ часов/день.\n"
-        elif anxiety_lvl == "high":
-            message += "🧘 Уровень тревожности высок — включи отдых и снизь нагрузку на вечер.\n"
-        else:
-            message += "📅 Составь умеренное расписание с фокусом на ключевые темы.\n"
-
-        self.result_text.delete("1.0", "end")
-        self.result_text.insert("end", message)
-
-        # Визуализация
-        for widget in self.plot_frame.winfo_children():
-            widget.destroy()
-
-        fig, ax = plt.subplots(figsize=(7, 2))
-        ax.plot(self.fuzzy_logic.days, self.fuzzy_logic.days_low, label="Мало")
-        ax.plot(self.fuzzy_logic.days, self.fuzzy_logic.days_medium, label="Средне")
-        ax.plot(self.fuzzy_logic.days, self.fuzzy_logic.days_high, label="Много")
-        ax.axvline(days, color='black', linestyle='--', label=f"Выбор: {days:.1f} дн.")
-        ax.set_title("Фаззификация дней до экзамена")
-        ax.legend()
-        ax.grid(True)
-
-        canvas = FigureCanvasTkAgg(fig, master=self.plot_frame)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill="both", expand=True)
+            messagebox.showerror("❌ Ошибка", "Неверный метод вывода.")
 
 
 if __name__ == "__main__":
